@@ -14,6 +14,7 @@ file loading/saving /reloading stuff.
 
 import os, sys
 import re, codecs
+import time
 
 from pyzo.qt import QtCore, QtGui, QtWidgets
 
@@ -23,6 +24,12 @@ from pyzo.codeeditor import Manager
 from pyzo.core.menu import EditorContextMenu
 from pyzo.core.baseTextCtrl import BaseTextCtrl, normalizePath
 from pyzo.core.pyzoLogging import print  # noqa
+
+import requests
+import openai
+import json
+from PyQt5.QtWidgets import QMessageBox
+
 import pyzo
 
 
@@ -249,7 +256,7 @@ def createEditor(parent, filename=None):
     return editor
 
 
-class PyzoEditor(BaseTextCtrl):
+class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
     # called when dirty changed or filename changed, etc
     somethingChanged = QtCore.Signal()
 
@@ -257,6 +264,8 @@ class PyzoEditor(BaseTextCtrl):
         super().__init__(parent, showLineNumbers=True, **kwds)
 
         # Init filename and name
+        self.openai_message = None
+        self.user_input_content = None #init AI text saving
         self._filename = ""
         self._name = "<TMP>"
 
@@ -528,6 +537,12 @@ class PyzoEditor(BaseTextCtrl):
         text = self.toPlainText()
         text = text.replace("\n", self.lineEndings)
 
+        # New variable to store the text content
+        self.user_input_content = text  # to send to openai
+        print(self.user_input_content)
+
+        self.call_openai_api()  # calling the new function
+
         # Make bytes
         bb = text.encode(self.encoding)
 
@@ -546,6 +561,64 @@ class PyzoEditor(BaseTextCtrl):
 
         # allow item to update its texts (no need: onModifiedChanged does this)
         # self.somethingChanged.emit()
+
+    def call_openai_api(self):
+        """
+        Function to send content to OpenAI API and receive response.
+        """
+        # The content to be sent
+        content = self.user_input_content
+
+        # OpenAI API URL and API Key
+        api_url = "https://api.openai.com/v1/chat/completions"
+        api_key = "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"  # Replace with your actual API key
+
+        # Prepare headers and data for the POST request
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0.7
+        }
+
+
+
+        # Make the API request
+        for attempt in range(5):
+            try:
+                # Your existing code to make the API request
+                response = requests.post(api_url, headers=headers, json=data)
+                response.raise_for_status()
+                result = response.json()
+                print(result)
+
+                # Extract the message from the response
+                self.openai_message = result['choices'][0]['message']['content']
+
+                msgBox = QMessageBox()
+                msgBox.setWindowTitle("OpenAI Response")
+                msgBox.setText("Response from OpenAI:")
+                msgBox.setInformativeText(self.openai_message)
+                msgBox.setStandardButtons(QMessageBox.Ok)
+                msgBox.exec_()
+
+                break
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    print(f"Rate limit hit, retrying in {5} seconds...")
+                    time.sleep(5)
+                    # Exponentially increase the delay for each retry
+                    #retry_delay *= 2
+                else:
+                    print(f"An error occurred: {e}")
+                    break
+            except Exception as e:
+                print(f"An error occurred: {e}")
+                break
+
 
     def reload(self):
         """Reload text using the self._filename.

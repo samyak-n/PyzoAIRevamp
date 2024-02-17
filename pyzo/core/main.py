@@ -179,6 +179,7 @@ class MainWindow(QtWidgets.QMainWindow):
         pyzo.editors = EditorTabs(self)
         self.setCentralWidget(pyzo.editors)
 
+
         # Create floater for shell
         self._shellDock = dock = QtWidgets.QDockWidget(self)
         if pyzo.config.settings.allowFloatingShell:
@@ -188,6 +189,12 @@ class MainWindow(QtWidgets.QMainWindow):
         dock.setObjectName("shells")
         dock.setWindowTitle("Shells")
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
+
+
+
+
+
+
 
         # Create shell stack
         pyzo.shells = ShellStackWidget(self)
