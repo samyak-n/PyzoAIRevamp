@@ -640,6 +640,7 @@ class FileMenu(Menu):
             else:
                 encodingNames.append(encoding)
 
+
         # Update
         self._encodingMenu.setOptions(encodingNames, encodingValues)
         self._encodingMenu.setCheckedOption(None, editorEncoding)
@@ -1665,6 +1666,24 @@ class EditorContextMenu(Menu):
             None,
             self._editItemCallback,
             "opendir",
+        )
+        self.addItem(
+            translate("menu", "Ask ChatGPT about the current Code"),
+            None,
+            self._editItemCallback,
+            "askChat",
+        )
+        self.addItem(
+            translate("menu", "Ask ChatGPT to debug the current Code"),
+            None,
+            self._editItemCallback,
+            "askChatDebug",
+        )
+        self.addItem(
+            translate("menu", "Ask ChatGPT to create tests for the current Code"),
+            None,
+            self._editItemCallback,
+            "askChatUnitTests",
         )
         self.addSeparator()
         self.addItem(

@@ -12,7 +12,7 @@ file loading/saving /reloading stuff.
 
 """
 
-import os, sys
+import os, sys, subprocess
 import re, codecs
 import time
 
@@ -31,7 +31,6 @@ import json
 from PyQt5.QtWidgets import QMessageBox
 
 import pyzo
-
 
 # Set default line ending (if not set)
 if not pyzo.config.settings.defaultLineEndings:
@@ -256,16 +255,20 @@ def createEditor(parent, filename=None):
     return editor
 
 
-class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
+class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
     # called when dirty changed or filename changed, etc
     somethingChanged = QtCore.Signal()
+    #chatRequest = QtCore.Signal(object)
+
+    chatRequest = QtCore.Signal()
+    print("signal sent")
 
     def __init__(self, parent, **kwds):
         super().__init__(parent, showLineNumbers=True, **kwds)
 
         # Init filename and name
         self.openai_message = None
-        self.user_input_content = None #init AI text saving
+        self.user_input_content = None  #init AI text saving
         self._filename = ""
         self._name = "<TMP>"
 
@@ -358,7 +361,109 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
         # Store
         self._encoding = value
 
-    ##
+    def askChat(self):
+        textCursor = self.textCursor()  # Get the current text cursor from the editor
+        selectedText = textCursor.selectedText()
+        # Check if the selected text is not empty
+        if selectedText:
+            self.user_input_content = selectedText  # Use the selected text
+        else:
+            self.user_input_content = self.toPlainText()  # Use all text if no selection
+
+        self.call_openai_api()  # Call the OpenAI API with the set content
+
+        # Regex pattern for triple backtick code blocks
+        code_pattern = r"```python\n(.*?)```"
+
+        # Find all non-greedy matches of the pattern
+        code_blocks = re.findall(code_pattern, self.openai_message, re.DOTALL)
+
+        # Return all code blocks found, joined by newlines if multiple blocks are found
+        new_message = '\n\n'.join(code_blocks).strip()
+
+        process = subprocess.Popen(['python', '-c', new_message],
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,
+                                   text=True)
+        # Capture the output and errors
+        output, errors = process.communicate()
+
+        # Retry loop if there are errors
+        while process.returncode != 0:
+            print("An error occurred while running the program:", errors)
+            self.askChatDebug(1, errors, new_message)  # Assuming this function handles further interactions
+            code_pattern = r"```python\n(.*?)```"
+            # Find all non-greedy matches of the pattern
+            temp_code_blocks = re.findall(code_pattern, self.openai_message, re.DOTALL)
+            # Return all code blocks found, joined by newlines if multiple blocks are found
+            new_temp_message = '\n\n'.join(temp_code_blocks).strip()
+
+            process = subprocess.Popen(['python', '-c', new_temp_message],
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       text=True)
+            output, errors = process.communicate()
+            if process.returncode == 0:
+                print("Code executed successfully without errors.")
+                break  # Exit the loop if no errors
+
+        # Optional: Handle the successful output
+        if process.returncode == 0 and output:
+            print("Output from Python code:", output)
+
+    def askChatSuper(self):
+        from pyzo.core.editorTabs import EditorTabs
+        textCursor = self.textCursor()  # Get the current text cursor from the editor
+        selectedText = textCursor.selectedText()
+        pyzo.editors = EditorTabs(self)
+        # Check if the selected text is not empty
+        if selectedText:
+            self.user_input_content = selectedText  # Use the selected text
+        else:
+            self.user_input_content = self.toPlainText()  # Use all text if no selection
+
+        self.call_openai_api()  # Call the OpenAI API with the set content
+        tempResponse = self.openai_message
+        pyzo.editors.newFile()
+        self.chatRequest.emit()
+        if tempResponse:
+            # Emit the signal instead of directly calling newFile
+            pyzo.editors.newFile()
+            self.chatRequest.emit()
+
+    def askChatUnitTests(self):
+        """
+        Asks ChatGPT to create unit tests for the currently selected code,
+        or all code in the editor if no selection is made.
+        """
+
+        textCursor = self.textCursor()  # Get the current text cursor from the editor
+        code_for_tests = textCursor.selectedText() if textCursor.selectedText() else self.toPlainText()
+
+        # Prepare the unit test request to send to ChatGPT
+        unit_test_request = f"Please create unit tests for the following Python code:\n\n{code_for_tests}\n\nProvide a comprehensive set of test cases to cover different scenarios and edge cases."
+
+        # Assuming you have a method similar to call_openai_api() that takes the unit test request
+        self.user_input_content = unit_test_request
+        self.call_openai_api()
+
+    def askChatDebug(self, error=0, errors="", chatCode=""):
+        """
+        Asks ChatGPT to help debug the currently selected code,
+        or all code in the editor if no selection is made.
+        """
+        if error == 0:
+            textCursor = self.textCursor()  # Get the current text cursor from the editor
+            code_to_debug = textCursor.selectedText() if textCursor.selectedText() else self.toPlainText()
+        else:
+            code_to_debug = chatCode
+
+        # Prepare the debugging request to send to ChatGPT
+        debugging_request = f"Please help me debug the following Python code:\n\n{code_to_debug}\n\nWhat might be going wrong? Errors (if any available):\n\n{errors}\n\n Send back the entire debugged code"
+
+        # Assuming you have a method similar to call_openai_api() that takes the debugging request
+        self.user_input_content = debugging_request
+        self.call_openai_api()
 
     def justifyText(self):
         """Overloaded version of justifyText to make it use our
@@ -498,8 +603,8 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
 
         # Remove whitespace in a single undo-able action
         if (
-            self.removeTrailingWS
-            or pyzo.config.settings.removeTrailingWhitespaceWhenSaving
+                self.removeTrailingWS
+                or pyzo.config.settings.removeTrailingWhitespaceWhenSaving
         ):
             # Original cursor to put state back at the end
             oricursor = self.textCursor()
@@ -515,8 +620,8 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
                 editCursor.setPosition(screenCursor.selectionStart())
                 editCursor.movePosition(editCursor.StartOfBlock)
                 while (
-                    editCursor.position() < screenCursor.selectionEnd()
-                    or editCursor.position() <= screenCursor.selectionStart()
+                        editCursor.position() < screenCursor.selectionEnd()
+                        or editCursor.position() <= screenCursor.selectionStart()
                 ):
                     editCursor.movePosition(editCursor.StartOfBlock)
                     editCursor.movePosition(
@@ -537,11 +642,11 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
         text = self.toPlainText()
         text = text.replace("\n", self.lineEndings)
 
-        # New variable to store the text content
-        self.user_input_content = text  # to send to openai
-        print(self.user_input_content)
-
-        self.call_openai_api()  # calling the new function
+        # # New variable to store the text content
+        # self.user_input_content = text  # to send to openai
+        # print(self.user_input_content)
+        #
+        # self.call_openai_api()  # calling the new function
 
         # Make bytes
         bb = text.encode(self.encoding)
@@ -567,11 +672,11 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
         Function to send content to OpenAI API and receive response.
         """
         # The content to be sent
-        content = self.user_input_content
+        content = self.user_input_content + "Always use codeblocks and python."
 
         # OpenAI API URL and API Key
         api_url = "https://api.openai.com/v1/chat/completions"
-        api_key = "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"  # Replace with your actual API key
+        api_key = "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"  # Replace with your actual API key
 
         # Prepare headers and data for the POST request
         headers = {
@@ -584,8 +689,6 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
             "temperature": 0.7
         }
 
-
-
         # Make the API request
         for attempt in range(5):
             try:
@@ -597,6 +700,9 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
 
                 # Extract the message from the response
                 self.openai_message = result['choices'][0]['message']['content']
+
+                #import pdb; pdb.set_trace()  # Add breakpoint here
+                #print("chatRequest receivers:", self.chatRequest.receivers(self.chatRequest.Signal))
 
                 msgBox = QMessageBox()
                 msgBox.setWindowTitle("OpenAI Response")
@@ -619,6 +725,12 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
                 print(f"An error occurred: {e}")
                 break
 
+        if pyzo.editors is not None:
+            pyzo.editors.chatRequest.emit(self.openai_message)
+            print(self.openai_message)
+            print("worked!")
+        else:
+            print("No editors found.")
 
     def reload(self):
         """Reload text using the self._filename.
@@ -700,7 +812,7 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
         def commentBlock(cursor):
             blockText = cursor.block().text()
             numMissingIndentChars = minindent - (
-                len(blockText) - len(blockText.lstrip(indentChar))
+                    len(blockText) - len(blockText.lstrip(indentChar))
             )
             if numMissingIndentChars > 0:
                 # Prevent setPosition from leaving bounds of the current block
@@ -717,6 +829,7 @@ class PyzoEditor(BaseTextCtrl): #this is the class that I need to edit
         """
         Uncomment the lines that are currently selected
         """
+
         # TODO: this should not be applied to lines that are part of a multi-line string
 
         # Define the uncomment function to be applied to all blocks
@@ -875,6 +988,7 @@ if __name__ == "__main__":
     class DummyParser:
         def parseThis(self, x):
             pass
+
 
     pyzo.parser = DummyParser()
     EditorContextMenu = QtWidgets.QMenu  # noqa

@@ -14,7 +14,9 @@ It also has a find/replace widget that is at the bottom of the editor.
 
 """
 
-import os, time, gc
+import os, time, gc, re
+import subprocess
+
 from pyzo.qt import QtCore, QtGui, QtWidgets
 
 import pyzo
@@ -966,6 +968,10 @@ class EditorTabs(QtWidgets.QWidget):
     # Signal to notify that the parser has parsed the text (emit by parser)
     parserDone = QtCore.Signal()
 
+    #chatRequest = QtCore.Signal(object)
+
+    chatRequest = QtCore.Signal(str)
+
     def __init__(self, parent):
         QtWidgets.QWidget.__init__(self, parent)
 
@@ -983,6 +989,26 @@ class EditorTabs(QtWidgets.QWidget):
         # Double clicking a tab saves the file, clicking on the bar opens a new file
         self._tabs.tabBar().tabDoubleClicked.connect(self.saveFile)
         self._tabs.tabBar().barDoubleClicked.connect(self.newFile)
+
+        self.chatRequest.connect(self.newFileChat)
+
+
+
+
+
+
+        # connect to the openai response handler
+
+        #self.chatRequest.connect(self.newFileChat)
+        #self.chatRequest.connect(self.onChatRequest)
+        #print("chatRequest receivers:", self.chatRequest.receivers(self.chatRequest.Signal))
+        #self.chatRequest.connect(self.newFile)
+
+        #editor = pyzo.editors.getCurrentEditor()
+
+        #editor.chatRequest.connect(self.newFile)
+
+        #import pdb; pdb.set_trace()  # Add breakpoint here
 
         # Create find/replace widget
         self._findReplace = FindReplaceWidget(self)
@@ -1131,6 +1157,10 @@ class EditorTabs(QtWidgets.QWidget):
             else:
                 pass
 
+    # def handleOpenaiResponse(self):
+    #     # Handle the response and open a new file tab as needed
+    #     self.newFile()
+
     def newFile(self):
         """Create a new (unsaved) file."""
 
@@ -1145,6 +1175,35 @@ class EditorTabs(QtWidgets.QWidget):
         editor.setFocus()
 
         return item
+
+    def newFileChat(self, message):
+        """Create a new (unsaved) file and fill it with the provided message."""
+        # Create editor
+        editor = createEditor(self, None)
+        editor.document().setModified(False)  # Start out as OK
+
+        # Add to list
+        item = FileItem(editor)
+        self._tabs.addItem(item)
+        self._tabs.setCurrentItem(item)
+
+        # Set focus to new file
+        editor.setFocus()
+        # Regex pattern for triple backtick code blocks
+        code_pattern = r"```python\n(.*?)```"
+
+        # Find all non-greedy matches of the pattern
+        code_blocks = re.findall(code_pattern, message, re.DOTALL)
+
+        # Return all code blocks found, joined by newlines if multiple blocks are found
+        new_message = '\n\n'.join(code_blocks).strip()
+
+        # Set the received message as the editor's text
+        editor.setPlainText(new_message)
+
+
+        return item
+
 
     def openFile(self):
         """Create a dialog for the user to select a file."""
