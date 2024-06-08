@@ -370,8 +370,89 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
         else:
             self.user_input_content = self.toPlainText()  # Use all text if no selection
 
+        temp_input_content = self.user_input_content + "there should be two testcases attached. Those are the main ones.\n"
+
         self.call_openai_api()  # Call the OpenAI API with the set content
 
+        # Regex pattern for triple backtick code blocks
+        code_pattern = r"```python\n(.*?)```"
+
+        # Find all non-greedy matches of the pattern
+        code_blocks = re.findall(code_pattern, self.openai_message, re.DOTALL)
+
+        # Return all code blocks found, joined by newlines if multiple blocks are found
+        new_message = '\n\n'.join(code_blocks).strip()
+
+        # Define a function to check if the code contains input statements
+        def contains_input_code(code):
+            input_patterns = [
+                "input(",  # Common pattern for input() function in Python
+            ]
+            return any(pattern in code for pattern in input_patterns)
+
+        # Check if the new_message contains input code
+        input_required = contains_input_code(new_message)
+
+        if input_required is False:
+            process = subprocess.Popen(['python', '-c', new_message],
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       text=True)
+            # Capture the output and errors
+            output, errors = process.communicate()
+
+            # Retry loop if there are errors and input is not required
+            while process.returncode != 0 and not input_required:
+                print("An error occurred while running the program:", errors)
+                self.askChatDebug(1, errors, new_message + "this was the original prompt: " + temp_input_content)  # Assuming this function handles further interactions
+                code_pattern = r"```python\n(.*?)```"
+                # Find all non-greedy matches of the pattern
+                temp_code_blocks = re.findall(code_pattern, self.openai_message, re.DOTALL)
+                # Return all code blocks found, joined by newlines if multiple blocks are found
+                new_temp_message = '\n\n'.join(temp_code_blocks).strip()
+
+                # Check if the new_temp_message contains input code
+                input_required = contains_input_code(new_temp_message)
+
+                process = subprocess.Popen(['python', '-c', new_temp_message],
+                                           stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE,
+                                           text=True)
+                output, errors = process.communicate()
+                if process.returncode == 0:
+                    print("Code executed successfully without errors.")
+                    self.askChatUnitTests(1, new_temp_message)
+                    break  # Exit the loop if no errors
+
+            # Optional: Handle the successful output
+            if process.returncode == 0 and output:
+                print("Output from Python code:", output)
+
+        self.askChatUnitTests(1, new_message + "this was the original prompt: " + temp_input_content)
+
+
+    def askChatUnitTests(self, flag=0, chatCode=""):
+        """
+        Asks ChatGPT to create unit tests for the currently selected code,
+        or all code in the editor if no selection is made.
+        """
+        if flag == 0:
+            textCursor = self.textCursor()  # Get the current text cursor from the editor
+            code_for_tests = textCursor.selectedText() if textCursor.selectedText() else self.toPlainText()
+        else:
+            code_for_tests = chatCode
+
+
+        # Prepare the unit test request to send to ChatGPT
+        unit_test_request = (f"Please create unit tests for the following Python code:\n\n{code_for_tests}\n\nProvide a "
+                             f"simple set of testcases to just prove that the concept works. Include the "
+                             f"original code in your response. NEVER overcomplicate. Strive for simplicity with these cases.")
+
+        # Assuming you have a method similar to call_openai_api() that takes the unit test request
+        self.user_input_content = unit_test_request
+        self.call_openai_api()
+
+        # new stuff
         # Regex pattern for triple backtick code blocks
         code_pattern = r"```python\n(.*?)```"
 
@@ -385,67 +466,40 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE,
                                    text=True)
-        # Capture the output and errors
+
         output, errors = process.communicate()
 
-        # Retry loop if there are errors
-        while process.returncode != 0:
-            print("An error occurred while running the program:", errors)
+        def has_test_failures(output):
+            return "FAILED" in output or "ERROR" in output
+
+        # Retry loop if there are test failures
+        while process.returncode != 0 or has_test_failures(output):
+            print("Test failures detected. Attempting to debug...")
             self.askChatDebug(1, errors, new_message)  # Assuming this function handles further interactions
-            code_pattern = r"```python\n(.*?)```"
-            # Find all non-greedy matches of the pattern
-            temp_code_blocks = re.findall(code_pattern, self.openai_message, re.DOTALL)
-            # Return all code blocks found, joined by newlines if multiple blocks are found
-            new_temp_message = '\n\n'.join(temp_code_blocks).strip()
+            test_code_blocks = re.findall(code_pattern, self.openai_message, re.DOTALL)
+
+            new_temp_message = '\n\n'.join(test_code_blocks).strip()
+            print(new_temp_message)
 
             process = subprocess.Popen(['python', '-c', new_temp_message],
                                        stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE,
                                        text=True)
             output, errors = process.communicate()
-            if process.returncode == 0:
-                print("Code executed successfully without errors.")
+            if process.returncode == 0 and not has_test_failures(output):
+                print("Code and tests executed successfully without errors.")
+                # self.openai_message = new_temp_message
+                # if pyzo.editors is not None:
+                #     pyzo.editors.chatRequest.emit(new_temp_message)
+                #     print(new_temp_message)
+                #     print("worked, Finished chat request")
+                # else:
+                #     print("No editors found.")
                 break  # Exit the loop if no errors
 
         # Optional: Handle the successful output
         if process.returncode == 0 and output:
-            print("Output from Python code:", output)
-
-    def askChatSuper(self):
-        from pyzo.core.editorTabs import EditorTabs
-        textCursor = self.textCursor()  # Get the current text cursor from the editor
-        selectedText = textCursor.selectedText()
-        pyzo.editors = EditorTabs(self)
-        # Check if the selected text is not empty
-        if selectedText:
-            self.user_input_content = selectedText  # Use the selected text
-        else:
-            self.user_input_content = self.toPlainText()  # Use all text if no selection
-
-        self.call_openai_api()  # Call the OpenAI API with the set content
-        tempResponse = self.openai_message
-        pyzo.editors.newFile()
-        self.chatRequest.emit()
-        if tempResponse:
-            # Emit the signal instead of directly calling newFile
-            pyzo.editors.newFile()
-            self.chatRequest.emit()
-
-    def askChatUnitTests(self):
-        """
-        Asks ChatGPT to create unit tests for the currently selected code,
-        or all code in the editor if no selection is made.
-        """
-
-        textCursor = self.textCursor()  # Get the current text cursor from the editor
-        code_for_tests = textCursor.selectedText() if textCursor.selectedText() else self.toPlainText()
-
-        # Prepare the unit test request to send to ChatGPT
-        unit_test_request = f"Please create unit tests for the following Python code:\n\n{code_for_tests}\n\nProvide a comprehensive set of test cases to cover different scenarios and edge cases."
-
-        # Assuming you have a method similar to call_openai_api() that takes the unit test request
-        self.user_input_content = unit_test_request
-        self.call_openai_api()
+            print("Output from Python code and tests:", output)
 
     def askChatDebug(self, error=0, errors="", chatCode=""):
         """
@@ -684,7 +738,7 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
             "Content-Type": "application/json"
         }
         data = {
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-4o",
             "messages": [{"role": "user", "content": content}],
             "temperature": 0.7
         }
@@ -692,32 +746,29 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
         # Make the API request
         for attempt in range(5):
             try:
-                # Your existing code to make the API request
+                # Make the API request
                 response = requests.post(api_url, headers=headers, json=data)
                 response.raise_for_status()
                 result = response.json()
                 print(result)
 
                 # Extract the message from the response
-                self.openai_message = result['choices'][0]['message']['content']
+                self.openai_message = result['choices'][0]['message']['content'].strip()
 
-                #import pdb; pdb.set_trace()  # Add breakpoint here
-                #print("chatRequest receivers:", self.chatRequest.receivers(self.chatRequest.Signal))
+                if self.openai_message != "":
+                    # Emit the chatRequest signal if the response is not blank
+                    pyzo.editors.chatRequest.emit(self.openai_message)
+                    print(self.openai_message)
+                    print("worked!")
+                    break
+                else:
+                    print(f"Attempt {attempt + 1}: Received blank response, retrying...")
+                    time.sleep(2)  # Wait for a while before retrying
 
-                msgBox = QMessageBox()
-                msgBox.setWindowTitle("OpenAI Response")
-                msgBox.setText("Response from OpenAI:")
-                msgBox.setInformativeText(self.openai_message)
-                msgBox.setStandardButtons(QMessageBox.Ok)
-                msgBox.exec_()
-
-                break
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
                     print(f"Rate limit hit, retrying in {5} seconds...")
                     time.sleep(5)
-                    # Exponentially increase the delay for each retry
-                    #retry_delay *= 2
                 else:
                     print(f"An error occurred: {e}")
                     break
@@ -725,12 +776,11 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
                 print(f"An error occurred: {e}")
                 break
 
-        if pyzo.editors is not None:
-            pyzo.editors.chatRequest.emit(self.openai_message)
-            print(self.openai_message)
-            print("worked!")
-        else:
-            print("No editors found.")
+        if not self.openai_message:
+            print("Failed to get a valid response after multiple attempts.")
+
+
+
 
     def reload(self):
         """Reload text using the self._filename.
