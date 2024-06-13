@@ -383,7 +383,6 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
         # Return all code blocks found, joined by newlines if multiple blocks are found
         new_message = '\n\n'.join(code_blocks).strip()
 
-        # Define a function to check if the code contains input statements
         def contains_input_code(code):
             input_patterns = [
                 "input(",  # Common pattern for input() function in Python
@@ -424,7 +423,6 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
                     self.askChatUnitTests(1, new_temp_message)
                     break  # Exit the loop if no errors
 
-            # Optional: Handle the successful output
             if process.returncode == 0 and output:
                 print("Output from Python code:", output)
 
@@ -448,7 +446,6 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
                              f"simple set of testcases to just prove that the concept works. Include the "
                              f"original code in your response. NEVER overcomplicate. Strive for simplicity with these cases.")
 
-        # Assuming you have a method similar to call_openai_api() that takes the unit test request
         self.user_input_content = unit_test_request
         self.call_openai_api()
 
@@ -488,16 +485,8 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
             output, errors = process.communicate()
             if process.returncode == 0 and not has_test_failures(output):
                 print("Code and tests executed successfully without errors.")
-                # self.openai_message = new_temp_message
-                # if pyzo.editors is not None:
-                #     pyzo.editors.chatRequest.emit(new_temp_message)
-                #     print(new_temp_message)
-                #     print("worked, Finished chat request")
-                # else:
-                #     print("No editors found.")
                 break  # Exit the loop if no errors
 
-        # Optional: Handle the successful output
         if process.returncode == 0 and output:
             print("Output from Python code and tests:", output)
 
@@ -515,7 +504,6 @@ class PyzoEditor(BaseTextCtrl):  #this is the class that I need to edit
         # Prepare the debugging request to send to ChatGPT
         debugging_request = f"Please help me debug the following Python code:\n\n{code_to_debug}\n\nWhat might be going wrong? Errors (if any available):\n\n{errors}\n\n Send back the entire debugged code"
 
-        # Assuming you have a method similar to call_openai_api() that takes the debugging request
         self.user_input_content = debugging_request
         self.call_openai_api()
 
